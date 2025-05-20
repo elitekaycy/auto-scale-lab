@@ -126,7 +126,6 @@ Resources:
             yum update -y
             yum install -y httpd stress
             
-            # Get instance metadata
             INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
             INSTANCE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
             
@@ -168,7 +167,6 @@ Resources:
             </html>
             EOF
             
-            # Create stress endpoint
             cat <<EOF > /var/www/html/stress
             #!/bin/bash
             echo "Content-type: text/html"
@@ -179,7 +177,6 @@ Resources:
             
             chmod +x /var/www/html/stress
             
-            # Configure Apache
             echo "Listen 80" > /etc/httpd/conf.d/custom.conf
             echo "<VirtualHost *:80>" >> /etc/httpd/conf.d/custom.conf
             echo "  DocumentRoot /var/www/html" >> /etc/httpd/conf.d/custom.conf
