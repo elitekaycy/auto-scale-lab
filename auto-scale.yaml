@@ -1,0 +1,295 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Auto Scaling Lab with Apache Web Servers (with scale-down policy)
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC ID where resources will be deployed
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of public subnet IDs for the ALB
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of private subnet IDs for the ASG
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 Key Pair for instance access
+  Environment:
+    Type: String
+    Default: Lab 
+    Description: Deployment Type 
+
+Resources:
+  AutoScalingALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for AutoScaling ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "AutoScaling-ALB-SG-${Environment}"
+        - Key: Component
+          Value: AutoScaling
+
+  AutoScalingInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for AutoScaling web servers
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !GetAtt AutoScalingALBSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: !Sub "AutoScaling-Instance-SG-${Environment}"
+        - Key: Component
+          Value: AutoScaling
+
+  AutoScalingWebALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "AutoScaling-WebALB-${Environment}"
+      Scheme: internet-facing
+      Subnets: !Ref PublicSubnetIds
+      SecurityGroups:
+        - !Ref AutoScalingALBSecurityGroup
+      Type: application
+      Tags:
+        - Key: Name
+          Value: !Sub "AutoScaling-WebALB-${Environment}"
+        - Key: Component
+          Value: AutoScaling
+
+  AutoScalingALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub "AutoScaling-WebServers-${Environment}"
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetType: instance
+      Tags:
+        - Key: Name
+          Value: !Sub "AutoScaling-TargetGroup-${Environment}"
+        - Key: Component
+          Value: AutoScaling
+
+  AutoScalingALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AutoScalingALBTargetGroup
+      LoadBalancerArn: !Ref AutoScalingWebALB
+      Port: 80
+      Protocol: HTTP
+
+  AutoScalingWebServerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "AutoScaling-WebServer-LT-${Environment}"
+      LaunchTemplateData:
+        ImageId: ami-0c55b159cbfafe1f0 
+        InstanceType: t2.micro
+        KeyName: !Ref KeyName
+        SecurityGroupIds:
+          - !Ref AutoScalingInstanceSecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub "AutoScaling-WebServer-${Environment}"
+              - Key: Component
+                Value: AutoScaling
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Sub "AutoScaling-WebServer-${Environment}"
+              - Key: Component
+                Value: AutoScaling
+        UserData:
+          Fn::Base64: |
+            #!/bin/bash -xe
+            # Install Apache and stress tool
+            yum update -y
+            yum install -y httpd stress
+            
+            # Get instance metadata
+            INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+            INSTANCE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+            
+            cat <<EOF > /var/www/html/index.html
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>AutoScaling Demo</title>
+                <style>
+                    body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+                    .info { font-size: 24px; margin-bottom: 30px; }
+                    .btn { 
+                        background-color: #4CAF50; 
+                        border: none; 
+                        color: white; 
+                        padding: 15px 32px; 
+                        text-align: center; 
+                        text-decoration: none; 
+                        display: inline-block; 
+                        font-size: 16px; 
+                        margin: 4px 2px; 
+                        cursor: pointer; 
+                        border-radius: 5px;
+                    }
+                    .btn:hover { background-color: #45a049; }
+                </style>
+            </head>
+            <body>
+                <div class="info">Hello from $INSTANCE_IP / $INSTANCE_ID</div>
+                <button class="btn" onclick="stressCPU()">Stress CPU</button>
+                <script>
+                    function stressCPU() {
+                        fetch('/stress', { method: 'POST' })
+                            .then(response => alert('CPU stress test started!'))
+                            .catch(error => alert('Error starting stress test'));
+                    }
+                </script>
+            </body>
+            </html>
+            EOF
+            
+            # Create stress endpoint
+            cat <<EOF > /var/www/html/stress
+            #!/bin/bash
+            echo "Content-type: text/html"
+            echo ""
+            stress --cpu 2 --timeout 300 &
+            echo "CPU stress test started"
+            EOF
+            
+            chmod +x /var/www/html/stress
+            
+            # Configure Apache
+            echo "Listen 80" > /etc/httpd/conf.d/custom.conf
+            echo "<VirtualHost *:80>" >> /etc/httpd/conf.d/custom.conf
+            echo "  DocumentRoot /var/www/html" >> /etc/httpd/conf.d/custom.conf
+            echo "  <Directory /var/www/html>" >> /etc/httpd/conf.d/custom.conf
+            echo "    Options ExecCGI" >> /etc/httpd/conf.d/custom.conf
+            echo "    AddHandler cgi-script .sh .bin .stress" >> /etc/httpd/conf.d/custom.conf
+            echo "    Require all granted" >> /etc/httpd/conf.d/custom.conf
+            echo "  </Directory>" >> /etc/httpd/conf.d/custom.conf
+            echo "</VirtualHost>" >> /etc/httpd/conf.d/custom.conf
+            
+            systemctl enable httpd
+            systemctl start httpd
+
+  AutoScalingWebServerASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub "AutoScaling-WebServer-ASG-${Environment}"
+      LaunchTemplate:
+        LaunchTemplateId: !Ref AutoScalingWebServerLaunchTemplate
+        Version: !GetAtt AutoScalingWebServerLaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 1
+      VPCZoneIdentifier: !Ref PrivateSubnetIds
+      TargetGroupARNs:
+        - !Ref AutoScalingALBTargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Sub "AutoScaling-WebServer-ASG-${Environment}"
+          PropagateAtLaunch: true
+        - Key: Component
+          Value: AutoScaling
+          PropagateAtLaunch: true
+
+  AutoScalingScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "AutoScaling-ScaleUp-Policy-${Environment}"
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingWebServerASG
+      Cooldown: 60
+      ScalingAdjustment: 1
+      PolicyType: SimpleScaling
+
+  AutoScalingScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub "AutoScaling-ScaleDown-Policy-${Environment}"
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName: !Ref AutoScalingWebServerASG
+      Cooldown: 300 
+      ScalingAdjustment: -1
+      PolicyType: SimpleScaling
+
+  AutoScalingCPUHighAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "AutoScaling-CPUHigh-Alarm-${Environment}"
+      AlarmDescription: Alarm when CPU exceeds 50%
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingWebServerASG
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 50
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AutoScalingScaleUpPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub "AutoScaling-CPUHigh-Alarm-${Environment}"
+        - Key: Component
+          Value: AutoScaling
+
+  AutoScalingCPULowAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "AutoScaling-CPULow-Alarm-${Environment}"
+      AlarmDescription: Alarm when CPU is below 50%
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingWebServerASG
+      Statistic: Average
+      Period: 300 
+      EvaluationPeriods: 2
+      Threshold: 50
+      ComparisonOperator: LessThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref AutoScalingScaleDownPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub "AutoScaling-CPULow-Alarm-${Environment}"
+        - Key: Component
+          Value: AutoScaling
+
+Outputs:
+  AutoScalingALBDNSName:
+    Description: DNS name of the AutoScaling Application Load Balancer
+    Value: !GetAtt AutoScalingWebALB.DNSName
+    Export:
+      Name: !Sub "AutoScaling-ALBDNSName-${Environment}"
+  AutoScalingASGName:
+    Description: Name of the Auto Scaling Group
+    Value: !Ref AutoScalingWebServerASG
+    Export:
+      Name: !Sub "AutoScaling-ASGName-${Environment}"
