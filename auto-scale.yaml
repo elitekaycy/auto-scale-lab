@@ -184,17 +184,18 @@ Resources:
             </html>
             EOF
 
-            cat <<EOF > /var/www/html/stress
+            cat <<'EOF' > /var/www/html/stress
             #!/bin/bash
             echo "Content-type: text/html"
             echo ""
-            stress --cpu 2 --timeout 300 &
+
+            nohup stress --cpu 2 --timeout 300 > /dev/null 2>&1 &
+
             echo "CPU stress test started"
             EOF
 
             chmod +x /var/www/html/stress
 
-            # No need to define Listen 80 again
             cat <<EOF > /etc/httpd/conf.d/custom.conf
             <VirtualHost *:80>
               DocumentRoot /var/www/html
