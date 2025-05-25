@@ -14,6 +14,7 @@ Parameters:
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
     Description: EC2 Key Pair for instance access
+    Default: auto-scale-ec2-pem
   Environment:
     Type: String
     Default: Lab 
