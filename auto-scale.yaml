@@ -51,6 +51,11 @@ Resources:
           FromPort: 80
           ToPort: 80
           SourceSecurityGroupId: !GetAtt AutoScalingALBSecurityGroup.GroupId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0     
       Tags:
         - Key: Name
           Value: !Sub "AutoScaling-Instance-SG-${Environment}"
@@ -106,6 +111,8 @@ Resources:
     Properties:
       LaunchTemplateName: !Sub "AutoScaling-WebServer-LT-${Environment}"
       LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: arn:aws:iam::205930614431:instance-profile/AutoScaleLabSessionConnectRule
         ImageId:
           Fn::Sub: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}"
         InstanceType: t2.micro
