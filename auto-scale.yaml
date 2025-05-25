@@ -3,13 +3,17 @@ Description: Auto Scaling Lab with Apache Web Servers (with scale-down policy)
 
 Parameters:
   VpcId:
-    Type: AWS::EC2::VPC::Id
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::VPC::Id>'
+    Default: /autoscale/lab/vpc-id
     Description: The VPC ID where resources will be deployed
+
   PublicSubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
+    Type: 'AWS::SSM::Parameter::Value<List<AWS::EC2::Subnet::Id>>'
+    Default: /autoscale/lab/public-subnets
     Description: List of public subnet IDs for the ALB
   PrivateSubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
+    Type: 'AWS::SSM::Parameter::Value<List<AWS::EC2::Subnet::Id>>'
+    Default: /autoscale/lab/private-subnets
     Description: List of private subnet IDs for the ASG
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
