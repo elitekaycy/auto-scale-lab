@@ -191,7 +191,7 @@ Resources:
             echo "Content-type: text/html"
             echo ""
 
-            nohup stress --cpu 8 --timeout 300 > /dev/null 2>&1 &
+            nohup stress --cpu 4 --timeout 300 > /dev/null 2>&1 &
 
             echo "CPU stress test started"
             EOF
