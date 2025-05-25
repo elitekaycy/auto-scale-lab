@@ -79,7 +79,7 @@ Resources:
       Port: 80
       Protocol: HTTP
       VpcId: !Ref VpcId
-      HealthCheckPath: /
+      HealthCheckPath: /index.html
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
